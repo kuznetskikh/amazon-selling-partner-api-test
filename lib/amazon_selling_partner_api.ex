@@ -4,10 +4,12 @@ defmodule AmazonSellingPartnerApi do
   @host "sellingpartnerapi-na.amazon.com"
   @region "us-east-1"
   @service :"execute-api"
+  @default_per_page 10
 
-  def list_purchase_orders(next_token \\ nil) do
-    token_param = next_token_param(next_token)
-    url = "https://#{@host}/vendor/orders/v1/purchaseOrders?limit=10#{token_param}"
+  def list_purchase_orders(opts \\ []) do
+    opts = Keyword.put_new(opts, :limit, @default_per_page)
+
+    url = "https://#{@host}/vendor/orders/v1/purchaseOrders#{query_from(opts)}"
 
     headers = get_headers(url)
 
@@ -17,8 +19,30 @@ defmodule AmazonSellingPartnerApi do
     end
   end
 
+  defp query_from([]), do: nil
+
+  defp query_from([{key, value} | opts]) do
+    "?#{camelize(key)}=#{value}#{do_query_from(opts)}"
+  end
+
+  defp do_query_from([]), do: nil
+
+  defp do_query_from([{key, value} | opts]) do
+    "&#{camelize(key)}=#{value}#{do_query_from(opts)}"
+  end
+
   defp next_token_param(nil), do: nil
   defp next_token_param(token), do: "&nextToken=#{token}"
+
+  defp camelize(atom) do
+    [h | rest] =
+      atom
+      |> to_string()
+      |> String.split("_")
+
+    [h | Enum.map(rest, &String.capitalize/1)]
+    |> Enum.join()
+  end
 
   def get_headers(url, action \\ "GET") do
     access_key_id = Application.get_env(:amazon_selling_partner_api, :access_key_id)
