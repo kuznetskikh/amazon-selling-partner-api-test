@@ -14,8 +14,8 @@ defmodule AmazonSellingPartnerApi do
     headers = get_headers(url)
 
     case HTTPoison.get!(url, headers) do
-      %{status_code: 200, body: body} -> Jason.decode!(body)["payload"]
-      error -> error
+      %{status_code: 200, body: body} -> {:ok, Jason.decode!(body)["payload"]}
+      error -> {:error, error}
     end
   end
 
