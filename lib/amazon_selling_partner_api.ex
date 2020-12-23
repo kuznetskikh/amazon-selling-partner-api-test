@@ -42,9 +42,6 @@ defmodule AmazonSellingPartnerApi do
   end
 
   def get_headers(url, action \\ "GET") do
-    access_key_id = Application.get_env(:amazon_selling_partner_api, :access_key_id)
-    secret_access_key = Application.get_env(:amazon_selling_partner_api, :secret_access_key)
-
     access_token = get_access_token()
     access_key_id = Application.get_env(:amazon_selling_partner_api, :access_key_id)
     secret_access_key = Application.get_env(:amazon_selling_partner_api, :secret_access_key)
