@@ -31,9 +31,6 @@ defmodule AmazonSellingPartnerApi do
     "&#{camelize(key)}=#{value}#{do_query_from(opts)}"
   end
 
-  defp next_token_param(nil), do: nil
-  defp next_token_param(token), do: "&nextToken=#{token}"
-
   defp camelize(atom) do
     [h | rest] =
       atom
