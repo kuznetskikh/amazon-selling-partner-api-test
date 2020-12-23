@@ -1,54 +1,67 @@
 defmodule AmazonSellingPartnerApi do
   @moduledoc false
 
-  def list_purchase_orders(
-        client_id,
-        client_secret,
-        refresh_token,
-        access_key_id,
-        secret_access_key
-      ) do
-    access_token = get_access_token(client_id, client_secret, refresh_token)
-    headers = get_headers(access_key_id, secret_access_key, access_token)
+  @host "sellingpartnerapi-na.amazon.com"
+  @region "us-east-1"
+  @service :"execute-api"
+  @default_per_page 10
 
-    presigned_url =
-      get_presigned_url(
-        access_key_id,
-        secret_access_key,
-        access_token
-      )
+  def list_purchase_orders(opts \\ []) do
+    opts = Keyword.put_new(opts, :limit, @default_per_page)
 
-    IO.puts(presigned_url)
+    url = "https://#{@host}/vendor/orders/v1/purchaseOrders#{query_from(opts)}"
 
-    HTTPoison.get!(
-      "https://sellingpartnerapi-na.amazon.com/vendor/orders/v1/purchaseOrders?limit=10",
-      headers
+    headers = get_headers(url)
+
+    case HTTPoison.get!(url, headers) do
+      %{status_code: 200, body: body} -> {:ok, Jason.decode!(body)["payload"]}
+      error -> {:error, error}
+    end
+  end
+
+  defp query_from([]), do: nil
+
+  defp query_from([{key, value} | opts]) do
+    "?#{camelize(key)}=#{value}#{do_query_from(opts)}"
+  end
+
+  defp do_query_from([]), do: nil
+
+  defp do_query_from([{key, value} | opts]) do
+    "&#{camelize(key)}=#{value}#{do_query_from(opts)}"
+  end
+
+  defp camelize(atom) do
+    [h | rest] =
+      atom
+      |> to_string()
+      |> String.split("_")
+
+    [h | Enum.map(rest, &String.capitalize/1)]
+    |> Enum.join()
+  end
+
+  def get_headers(url, action \\ "GET") do
+    access_token = get_access_token()
+    access_key_id = Application.get_env(:amazon_selling_partner_api, :access_key_id)
+    secret_access_key = Application.get_env(:amazon_selling_partner_api, :secret_access_key)
+
+    AWSAuth.sign_authorization_header(
+      access_key_id,
+      secret_access_key,
+      action,
+      url,
+      @region,
+      to_string(@service),
+      %{"x-amz-access-token" => access_token}
     )
   end
 
-  defp get_headers(access_key_id, secret_access_key, access_token) do
-    {:ok, headers} =
-      ExAws.Auth.headers(
-        :get,
-        "https://sellingpartnerapi-na.amazon.com/vendor/orders/v1/purchaseOrders?limit=10",
-        String.to_atom("execute-api"),
-        ExAws.Config.new(
-          :iot,
-          region: "us-east-1",
-          access_key_id: access_key_id,
-          secret_access_key: secret_access_key
-        ),
-        [
-          {"x-amz-access-token", access_token},
-          {"user-agent", "hackney/1.17.0"}
-        ],
-        nil
-      )
+  def get_access_token do
+    client_id = Application.get_env(:amazon_selling_partner_api, :client_id)
+    client_secret = Application.get_env(:amazon_selling_partner_api, :client_secret)
+    refresh_token = Application.get_env(:amazon_selling_partner_api, :refresh_token)
 
-    headers
-  end
-
-  defp get_access_token(client_id, client_secret, refresh_token) do
     refresh_client =
       OAuth2.Client.new(
         strategy: OAuth2.Strategy.Refresh,
@@ -71,34 +84,5 @@ defmodule AmazonSellingPartnerApi do
     } = OAuth2.Client.get_token!(refresh_client)
 
     access_token
-  end
-
-  defp get_presigned_url(access_key_id, secret_access_key, access_token) do
-    date_time = :calendar.universal_time()
-    {{year, month, day}, {hour, minute, second}} = date_time
-
-    {:ok, presigned_url} =
-      ExAws.Auth.presigned_url(
-        :get,
-        "https://sellingpartnerapi-na.amazon.com/vendor/orders/v1/purchaseOrders",
-        String.to_atom("execute-api"),
-        date_time,
-        ExAws.Config.new(
-          :iot,
-          region: "us-east-1",
-          access_key_id: access_key_id,
-          secret_access_key: secret_access_key
-        ),
-        30,
-        [],
-        nil,
-        [
-          {"x-amz-access-token", access_token},
-          {"x-amz-date", "#{year}#{month}#{day}T#{hour}#{minute}#{second}Z"},
-          {"user-agent", "hackney/1.17.0"}
-        ]
-      )
-
-    presigned_url
   end
 end
