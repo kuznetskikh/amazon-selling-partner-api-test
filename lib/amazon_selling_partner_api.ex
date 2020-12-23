@@ -1,88 +1,96 @@
 defmodule AmazonSellingPartnerApi do
-  @moduledoc false
+  @moduledoc """
+  Service for interaction with Amazon Selling Partner API.
+  """
 
-  @host "sellingpartnerapi-na.amazon.com"
-  @region "us-east-1"
-  @service :"execute-api"
-  @default_per_page 10
+  @max_page_number 10
+  @pagination_timeout 500
 
-  def list_purchase_orders(opts \\ []) do
-    opts = Keyword.put_new(opts, :limit, @default_per_page)
+  def list_purchase_orders(created_after, vendor_code) do
+    list_purchase_orders_result =
+      Enum.reduce_while(
+        1..@max_page_number,
+        %{
+          pagination_token: nil,
+          purchase_orders: [],
+          error: nil
+        },
+        fn _, acc ->
+          list_purchase_orders_accumulate(created_after, vendor_code, acc)
+        end
+      )
 
-    url = "https://#{@host}/vendor/orders/v1/purchaseOrders#{query_from(opts)}"
+    case list_purchase_orders_result do
+      %{purchase_orders: purchase_orders} ->
+        {:ok, purchase_orders}
 
-    headers = get_headers(url)
-
-    case HTTPoison.get!(url, headers) do
-      %{status_code: 200, body: body} -> {:ok, Jason.decode!(body)["payload"]}
-      error -> {:error, error}
+      %{error: error} ->
+        {:error, error}
     end
   end
 
-  defp query_from([]), do: nil
+  defp list_purchase_orders_accumulate(created_after, vendor_code, acc) do
+    case list_purchase_orders_paginate(created_after, vendor_code, acc) do
+      {
+        :ok,
+        %{pagination_token: nil} = last_acc
+      } ->
+        {:halt, last_acc}
 
-  defp query_from([{key, value} | opts]) do
-    "?#{camelize(key)}=#{value}#{do_query_from(opts)}"
+      {
+        :ok,
+        %{pagination_token: _} = next_acc
+      } ->
+        Process.sleep(@pagination_timeout)
+
+        {:cont, next_acc}
+
+      {:error, error} ->
+        {:halt, %{error: error}}
+    end
   end
 
-  defp do_query_from([]), do: nil
+  defp list_purchase_orders_paginate(
+         created_after,
+         vendor_code,
+         %{
+           pagination_token: pagination_token,
+           purchase_orders: purchase_orders
+         }
+       ) do
+    params = [
+      {"createdAfter", DateTime.to_iso8601(created_after)},
+      {"orderingVendorCode", vendor_code},
+      # Use ascentive sorting order for purchase order creation date, because we
+      # set a limit on the count of pages retrieved per one call, not to miss
+      # older purchase orders on the next call.
+      {"sortOrder", "ASC"},
+      {"nextToken", pagination_token}
+    ]
 
-  defp do_query_from([{key, value} | opts]) do
-    "&#{camelize(key)}=#{value}#{do_query_from(opts)}"
-  end
-
-  defp camelize(atom) do
-    [h | rest] =
-      atom
-      |> to_string()
-      |> String.split("_")
-
-    [h | Enum.map(rest, &String.capitalize/1)]
-    |> Enum.join()
-  end
-
-  def get_headers(url, action \\ "GET") do
-    access_token = get_access_token()
-    access_key_id = Application.get_env(:amazon_selling_partner_api, :access_key_id)
-    secret_access_key = Application.get_env(:amazon_selling_partner_api, :secret_access_key)
-
-    AWSAuth.sign_authorization_header(
-      access_key_id,
-      secret_access_key,
-      action,
-      url,
-      @region,
-      to_string(@service),
-      %{"x-amz-access-token" => access_token}
-    )
-  end
-
-  def get_access_token do
-    client_id = Application.get_env(:amazon_selling_partner_api, :client_id)
-    client_secret = Application.get_env(:amazon_selling_partner_api, :client_secret)
-    refresh_token = Application.get_env(:amazon_selling_partner_api, :refresh_token)
-
-    refresh_client =
-      OAuth2.Client.new(
-        strategy: OAuth2.Strategy.Refresh,
-        site: "https://api.amazon.com",
-        token_url: "/auth/o2/token",
-        serializers: %{
-          "application/json" => Jason
-        },
-        client_id: client_id,
-        client_secret: client_secret,
-        params: %{
-          "refresh_token" => refresh_token
+    case AmazonSellingPartnerApi.Client.purchase_orders(params) do
+      {
+        :ok,
+        %{
+          status_code: 200,
+          body: body
         }
-      )
+      } ->
+        response_payload = Jason.decode!(body)["payload"]
 
-    %OAuth2.Client{
-      token: %OAuth2.AccessToken{
-        access_token: access_token
-      }
-    } = OAuth2.Client.get_token!(refresh_client)
+        {
+          :ok,
+          %{
+            pagination_token: response_payload["pagination"]["nextToken"],
+            purchase_orders: purchase_orders ++ response_payload["orders"]
+          }
+        }
 
-    access_token
+      {:ok, error_response} ->
+        {:error, error_response}
+
+      {:error, _} = error_result ->
+        error_result
+    end
   end
 end
