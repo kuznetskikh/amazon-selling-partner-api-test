@@ -12,7 +12,12 @@ defmodule AmazonSellingPartnerApi.Client do
   @access_token_expiration_threshold_seconds 60
 
   def purchase_orders(opts \\ []) do
-    query_params = URI.encode_query(opts)
+    query_params =
+      opts
+      |> camelize_keys()
+      |> URI.encode_query()
+
+    IO.puts(inspect(query_params))
 
     url =
       "#{@api_site}/vendor/orders/v1/purchaseOrders"
@@ -27,6 +32,19 @@ defmodule AmazonSellingPartnerApi.Client do
       {:error, _} = error_result ->
         error_result
     end
+  end
+
+  defp camelize_keys([]), do: []
+  defp camelize_keys([{k, v} | rest]), do: [{camelize(k), v} | camelize_keys(rest)]
+
+  defp camelize(atom) do
+    [h | rest] =
+      atom
+      |> to_string()
+      |> String.split("_")
+
+    [h | Enum.map(rest, &String.capitalize/1)]
+    |> Enum.join()
   end
 
   defp get_headers(url, http_method) do

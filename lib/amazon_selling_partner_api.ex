@@ -2,10 +2,13 @@ defmodule AmazonSellingPartnerApi do
   @moduledoc """
   Service for interaction with Amazon Selling Partner API.
   """
+  alias AmazonSellingPartnerApi.Client
 
   @max_page_number 10
   @pagination_timeout 500
 
+  @spec list_purchase_orders(created_after :: DateTime.t(), vnedor_code :: binary()) ::
+          {:ok, list(map())} | {:error, any()}
   def list_purchase_orders(created_after, vendor_code) do
     list_purchase_orders_result =
       Enum.reduce_while(
@@ -59,16 +62,16 @@ defmodule AmazonSellingPartnerApi do
          }
        ) do
     params = [
-      {"createdAfter", DateTime.to_iso8601(created_after)},
-      {"orderingVendorCode", vendor_code},
+      created_after: DateTime.to_iso8601(created_after),
+      ordering_vendor_code: vendor_code,
       # Use ascentive sorting order for purchase order creation date, because we
       # set a limit on the count of pages retrieved per one call, not to miss
       # older purchase orders on the next call.
-      {"sortOrder", "ASC"},
-      {"nextToken", pagination_token}
+      sort_order: "ASC",
+      next_token: pagination_token
     ]
 
-    case AmazonSellingPartnerApi.Client.purchase_orders(params) do
+    case Client.purchase_orders(params) do
       {
         :ok,
         %{
