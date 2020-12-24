@@ -17,8 +17,6 @@ defmodule AmazonSellingPartnerApi.Client do
       |> camelize_keys()
       |> URI.encode_query()
 
-    IO.puts(inspect(query_params))
-
     url =
       "#{@api_site}/vendor/orders/v1/purchaseOrders"
       |> URI.parse()
