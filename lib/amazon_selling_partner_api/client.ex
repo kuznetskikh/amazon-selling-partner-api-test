@@ -3,31 +3,35 @@ defmodule AmazonSellingPartnerApi.Client do
   HTTP client for interaction with Amazon Selling Partner API.
   """
 
-  @api_site "https://sellingpartnerapi-na.amazon.com"
-  @aws_region "us-east-1"
+  alias OAuth2.Client, as: AuthClient
+  alias OAuth2.Strategy.Refresh, as: AuthStrategy
+
   @aws_service "execute-api"
 
-  @access_token_site "https://api.amazon.com"
-  @access_token_path "/auth/o2/token"
   @access_token_expiration_threshold_seconds 60
 
+  @spec purchase_orders(opts :: Keyword.t()) :: {:ok, binary(), list(map())} | {:error, any()}
   def purchase_orders(opts \\ []) do
+    api_site = fetch_config_value!(:api_site)
+
     query_params =
       opts
       |> camelize_keys()
       |> URI.encode_query()
 
     url =
-      "#{@api_site}/vendor/orders/v1/purchaseOrders"
+      "#{api_site}/vendor/orders/v1/purchaseOrders"
       |> URI.parse()
       |> Map.put(:query, query_params)
       |> URI.to_string()
 
     case get_headers(url, "GET") do
       {:ok, headers} ->
-        HTTPoison.get(url, headers)
+        url
+        |> HTTPoison.get(headers)
+        |> handle_response(["orders"], [])
 
-      {:error, _} = error_result ->
+      {:error, _any_reason} = error_result ->
         error_result
     end
   end
@@ -57,14 +61,14 @@ defmodule AmazonSellingPartnerApi.Client do
             secret_access_key,
             http_method,
             url,
-            @aws_region,
+            region(),
             @aws_service,
             %{"x-amz-access-token" => access_token.access_token}
           )
 
         {:ok, headers}
 
-      {:error, _} = error_result ->
+      {:error, _any_reason} = error_result ->
         error_result
     end
   end
@@ -75,8 +79,8 @@ defmodule AmazonSellingPartnerApi.Client do
         update_access_token()
 
       access_token ->
-        # Verify access token expiration time using a little threshold and
-        # request new one if required.
+        # Verify access token expiration time using a little threshold and request new one if
+        # required.
         access_token_clarified_expires_at =
           DateTime.add(
             DateTime.utc_now(),
@@ -88,8 +92,7 @@ defmodule AmazonSellingPartnerApi.Client do
         if DateTime.compare(
              access_token_clarified_expires_at,
              access_token_expires_at
-           ) ===
-             :gt do
+           ) == :gt do
           update_access_token()
         else
           {:ok, access_token}
@@ -100,45 +103,87 @@ defmodule AmazonSellingPartnerApi.Client do
   defp update_access_token do
     case get_access_token() do
       {:ok, access_token} ->
-        Application.put_env(
-          :amazon_selling_partner_api,
-          :access_token,
-          access_token
-        )
+        Application.put_env(:amazon_selling_partner_api, :access_token, access_token)
 
         {:ok, access_token}
 
-      {:error, _} = error_result ->
+      {:error, _any_reason} = error_result ->
         error_result
     end
   end
 
-  def get_access_token do
+  defp get_access_token do
+    access_token_site = fetch_config_value!(:access_token_site)
     client_id = fetch_config_value!(:client_id)
     client_secret = fetch_config_value!(:client_secret)
     refresh_token = fetch_config_value!(:refresh_token)
 
     client =
-      OAuth2.Client.new(
-        strategy: OAuth2.Strategy.Refresh,
-        site: @access_token_site,
-        token_url: @access_token_path,
+      AuthClient.new(
+        strategy: AuthStrategy,
+        site: access_token_site,
+        token_url: "/auth/o2/token",
         serializers: %{"application/json" => Jason},
         client_id: client_id,
         client_secret: client_secret,
         params: %{"refresh_token" => refresh_token}
       )
 
-    case OAuth2.Client.get_token(client) do
-      {:ok, %OAuth2.Client{token: access_token}} ->
+    case AuthClient.get_token(client) do
+      {:ok, %AuthClient{token: access_token}} ->
         {:ok, access_token}
 
-      {:error, _} = error_result ->
+      {:error, _any_reason} = error_result ->
         error_result
     end
+  end
+
+  defp region do
+    Application.get_env(:ex_aws, :region)
   end
 
   defp fetch_config_value!(key) do
     Application.fetch_env!(:amazon_selling_partner_api, key)
   end
+
+  defp handle_response(
+         {
+           :ok,
+           %{
+             status_code: 200,
+             body: body
+           }
+         },
+         keys,
+         default_value
+       ) do
+    case Jason.decode(body) do
+      {:ok, %{"payload" => payload}} ->
+        {
+          :ok,
+          get_in(payload, ["pagination", "nextToken"]),
+          get_in(payload, keys) || default_value
+        }
+
+      {:ok, error_response_body} ->
+        {:error, error_response_body}
+
+      {:error, _any_reason} = error_result ->
+        error_result
+    end
+  end
+
+  defp handle_response(
+         {:ok, error_response},
+         _any_keys,
+         _any_default_value
+       ),
+       do: {:error, error_response}
+
+  defp handle_response(
+         error_result = {:error, _any_reason},
+         _any_keys,
+         _any_default_value
+       ),
+       do: error_result
 end

@@ -2,64 +2,52 @@ defmodule AmazonSellingPartnerApi do
   @moduledoc """
   Service for interaction with Amazon Selling Partner API.
   """
+
   alias AmazonSellingPartnerApi.Client
 
-  @max_page_number 10
   @pagination_timeout 500
 
-  @spec list_purchase_orders(created_after :: DateTime.t(), vnedor_code :: binary()) ::
+  @spec list_purchase_orders(created_after :: DateTime.t(), vendor_code :: binary()) ::
           {:ok, list(map())} | {:error, any()}
   def list_purchase_orders(created_after, vendor_code) do
     list_purchase_orders_result =
-      Enum.reduce_while(
-        1..@max_page_number,
-        %{
-          pagination_token: nil,
-          purchase_orders: [],
-          error: nil
-        },
-        fn _, acc ->
+      fn -> :unused end
+      |> Stream.repeatedly()
+      |> Enum.reduce_while(
+        {:ok, nil, []},
+        fn _any, acc ->
           list_purchase_orders_accumulate(created_after, vendor_code, acc)
         end
       )
 
     case list_purchase_orders_result do
-      %{purchase_orders: purchase_orders} ->
+      {:ok, _any_pagination_token, purchase_orders} ->
         {:ok, purchase_orders}
 
-      %{error: error} ->
-        {:error, error}
+      {:error, _any_reason} = error_result ->
+        error_result
     end
   end
 
   defp list_purchase_orders_accumulate(created_after, vendor_code, acc) do
     case list_purchase_orders_paginate(created_after, vendor_code, acc) do
-      {
-        :ok,
-        %{pagination_token: nil} = last_acc
-      } ->
+      {:ok, nil, _any_purchase_orders} = last_acc ->
         {:halt, last_acc}
 
-      {
-        :ok,
-        %{pagination_token: _} = next_acc
-      } ->
+      {:ok, _any_pagination_token, _any_purchase_orders} = next_acc ->
         Process.sleep(@pagination_timeout)
 
         {:cont, next_acc}
 
-      {:error, error} ->
-        {:halt, %{error: error}}
+      {:error, _any_reason} = error_result ->
+        {:halt, error_result}
     end
   end
 
   defp list_purchase_orders_paginate(
          created_after,
          vendor_code,
-         %{
-           pagination_token: pagination_token,
-           purchase_orders: purchase_orders
-         }
+         {:ok, pagination_token, purchase_orders}
        ) do
     params = [
       created_after: DateTime.to_iso8601(created_after),
@@ -72,27 +60,10 @@ defmodule AmazonSellingPartnerApi do
     ]
 
     case Client.purchase_orders(params) do
-      {
-        :ok,
-        %{
-          status_code: 200,
-          body: body
-        }
-      } ->
-        response_payload = Jason.decode!(body)["payload"]
+      {:ok, pagination_token, next_purchase_orders} ->
+        {:ok, pagination_token, purchase_orders ++ next_purchase_orders}
 
-        {
-          :ok,
-          %{
-            pagination_token: response_payload["pagination"]["nextToken"],
-            purchase_orders: purchase_orders ++ response_payload["orders"]
-          }
-        }
-
-      {:ok, error_response} ->
-        {:error, error_response}
-
-      {:error, _} = error_result ->
+      {:error, _any_reason} = error_result ->
         error_result
     end
   end
